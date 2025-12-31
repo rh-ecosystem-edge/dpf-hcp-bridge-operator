@@ -39,6 +39,7 @@ import (
 
 	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller"
+	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/bluefield"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -202,9 +203,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize BlueField Image Resolver
+	imageResolver := bluefield.NewImageResolver(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller"))
+
 	if err := (&controller.DPFHCPBridgeReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorderFor("dpfhcpbridge-controller"),
+		ImageResolver: imageResolver,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DPFHCPBridge")
 		os.Exit(1)

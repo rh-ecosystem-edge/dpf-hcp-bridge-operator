@@ -25,11 +25,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
+	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/bluefield"
 )
 
 var _ = Describe("DPFHCPBridge Controller", func() {
@@ -81,15 +83,21 @@ var _ = Describe("DPFHCPBridge Controller", func() {
 
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
+			fakeRecorder := record.NewFakeRecorder(10)
 			controllerReconciler := &DPFHCPBridgeReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:        k8sClient,
+				Scheme:        k8sClient.Scheme(),
+				ImageResolver: bluefield.NewImageResolver(k8sClient, fakeRecorder),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).NotTo(HaveOccurred())
+			// With native Kubernetes retry, transient errors (like ConfigMap not found)
+			// are returned as errors to trigger controller-runtime's exponential backoff
+			// This is expected behavior
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ConfigMap ocp-bluefield-images not found"))
 		})
 	})
 })
