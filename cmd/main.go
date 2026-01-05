@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -26,11 +27,15 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -42,6 +47,7 @@ import (
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/bluefield"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/dpucluster"
+	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/hostedcluster"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/secrets"
 	// +kubebuilder:scaffold:imports
 )
@@ -216,6 +222,16 @@ func main() {
 	// Initialize Secrets Validator
 	secretsValidator := secrets.NewValidator(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller"))
 
+	// Create clusters namespace if it doesn't exist
+	// This namespace is required for HyperShift HostedCluster and NodePool resources
+	if err := ensureClustersNamespace(mgr.GetClient()); err != nil {
+		setupLog.Error(err, "unable to create clusters namespace")
+		os.Exit(1)
+	}
+
+	// Initialize Secret Manager for HostedCluster lifecycle
+	secretManager := hostedcluster.NewSecretManager(mgr.GetClient())
+
 	if err := (&controller.DPFHCPBridgeReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
@@ -223,6 +239,7 @@ func main() {
 		ImageResolver:       imageResolver,
 		DPUClusterValidator: dpuClusterValidator,
 		SecretsValidator:    secretsValidator,
+		SecretManager:       secretManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DPFHCPBridge")
 		os.Exit(1)
@@ -259,4 +276,28 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// ensureClustersNamespace creates the "clusters" namespace if it doesn't exist
+// This namespace is required by HyperShift for HostedCluster and NodePool resources
+func ensureClustersNamespace(c client.Client) error {
+	ctx := context.Background()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "clusters",
+		},
+	}
+
+	err := c.Create(ctx, ns)
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Namespace already exists, this is fine
+			setupLog.Info("clusters namespace already exists")
+			return nil
+		}
+		return err
+	}
+
+	setupLog.Info("created clusters namespace")
+	return nil
 }

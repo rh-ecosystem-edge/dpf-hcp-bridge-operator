@@ -85,17 +85,18 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 
 			// UPDATE
 			By("Updating the DPFHCPBridge spec")
-			// Get a fresh copy for update
-			toUpdate := &provisioningv1alpha1.DPFHCPBridge{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: bridgeName, Namespace: "default"}, toUpdate)
-			Expect(err).NotTo(HaveOccurred())
-
-			initialGeneration := toUpdate.Generation
-			// Update only mutable fields
-			toUpdate.Spec.OCPReleaseImage = "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.6-multi"
-
-			err = k8sClient.Update(ctx, toUpdate)
-			Expect(err).NotTo(HaveOccurred())
+			// Wrap in Eventually to handle race with controller
+			var initialGeneration int64
+			Eventually(func() error {
+				toUpdate := &provisioningv1alpha1.DPFHCPBridge{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: bridgeName, Namespace: "default"}, toUpdate); err != nil {
+					return err
+				}
+				initialGeneration = toUpdate.Generation
+				// Update only mutable fields
+				toUpdate.Spec.OCPReleaseImage = "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.6-multi"
+				return k8sClient.Update(ctx, toUpdate)
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
 
 			// Verify update
 			updated := &provisioningv1alpha1.DPFHCPBridge{}
@@ -149,12 +150,16 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 
 			initialGeneration := created.Generation
 
-			// Update status
+			// Update status with retry to avoid race with controller
 			By("Updating status fields")
-			created.Status.Phase = provisioningv1alpha1.PhaseProvisioning
-
-			err = k8sClient.Status().Update(ctx, created)
-			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				bridge := &provisioningv1alpha1.DPFHCPBridge{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: bridgeName, Namespace: "default"}, bridge); err != nil {
+					return err
+				}
+				bridge.Status.Phase = provisioningv1alpha1.PhaseProvisioning
+				return k8sClient.Status().Update(ctx, bridge)
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
 
 			// Verify status was updated but generation didn't change
 			updated := &provisioningv1alpha1.DPFHCPBridge{}
@@ -199,30 +204,35 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 
 			// Populate all status fields
 			By("Setting all status fields")
-			created.Status = provisioningv1alpha1.DPFHCPBridgeStatus{
-				Phase: provisioningv1alpha1.PhaseReady,
-				Conditions: []metav1.Condition{
-					{
-						Type:               "Ready",
-						Status:             metav1.ConditionTrue,
-						Reason:             "BridgeReady",
-						Message:            "All components operational",
-						LastTransitionTime: metav1.Now(),
+			// Wrap in Eventually to handle race with controller
+			Eventually(func() error {
+				bridge := &provisioningv1alpha1.DPFHCPBridge{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: bridgeName, Namespace: "default"}, bridge); err != nil {
+					return err
+				}
+				bridge.Status = provisioningv1alpha1.DPFHCPBridgeStatus{
+					Phase: provisioningv1alpha1.PhaseReady,
+					Conditions: []metav1.Condition{
+						{
+							Type:               "Ready",
+							Status:             metav1.ConditionTrue,
+							Reason:             "BridgeReady",
+							Message:            "All components operational",
+							LastTransitionTime: metav1.Now(),
+						},
 					},
-				},
-				HostedClusterRef: &corev1.ObjectReference{
-					APIVersion: "hypershift.openshift.io/v1beta1",
-					Kind:       "HostedCluster",
-					Name:       bridgeName,
-					Namespace:  "default",
-				},
-				KubeConfigSecretRef: &corev1.LocalObjectReference{
-					Name: bridgeName + "-kubeconfig",
-				},
-			}
-
-			err = k8sClient.Status().Update(ctx, created)
-			Expect(err).NotTo(HaveOccurred())
+					HostedClusterRef: &corev1.ObjectReference{
+						APIVersion: "hypershift.openshift.io/v1beta1",
+						Kind:       "HostedCluster",
+						Name:       bridgeName,
+						Namespace:  "default",
+					},
+					KubeConfigSecretRef: &corev1.LocalObjectReference{
+						Name: bridgeName + "-kubeconfig",
+					},
+				}
+				return k8sClient.Status().Update(ctx, bridge)
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
 
 			// Verify all status fields
 			retrieved := &provisioningv1alpha1.DPFHCPBridge{}

@@ -1,0 +1,336 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	dpuprovisioningv1alpha1 "github.com/nvidia/doca-platform/api/provisioning/v1alpha1"
+	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
+)
+
+// Phase Transition Tests
+// These tests observe controller behavior and verify that the controller
+// correctly computes phases based on conditions (NOT manual status manipulation)
+var _ = Describe("DPFHCPBridge Phase Transitions", func() {
+	const (
+		timeout  = time.Second * 30
+		interval = time.Second * 1
+	)
+
+	var (
+		ctx              context.Context
+		testNamespace    string
+		dpuClusterName   string
+		pullSecretName   string
+		sshKeySecretName string
+		ocpReleaseImage  string
+		blueFieldImage   string
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		testNamespace = "default"
+		dpuClusterName = "test-dpucluster-phase"
+		pullSecretName = "test-pull-secret-phase"
+		sshKeySecretName = "test-ssh-key-phase"
+		ocpReleaseImage = "quay.io/openshift-release-dev/ocp-release:4.17.0-x86_64"
+		blueFieldImage = "quay.io/example/bluefield:4.17.0"
+
+		// Ensure dpf-hcp-bridge-system namespace exists (for ConfigMap)
+		operatorNs := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dpf-hcp-bridge-system",
+			},
+		}
+		err := k8sClient.Create(ctx, operatorNs)
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			Fail("Failed to create dpf-hcp-bridge-system namespace: " + err.Error())
+		}
+
+		// Create ocp-bluefield-images ConfigMap for image resolution
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ocp-bluefield-images",
+				Namespace: "dpf-hcp-bridge-system",
+			},
+			Data: map[string]string{
+				"4.17.0": blueFieldImage,
+			},
+		}
+		Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+		// Create DPUCluster
+		dpuCluster := &dpuprovisioningv1alpha1.DPUCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      dpuClusterName,
+				Namespace: testNamespace,
+			},
+			Spec: dpuprovisioningv1alpha1.DPUClusterSpec{
+				Type: "bf3",
+			},
+		}
+		Expect(k8sClient.Create(ctx, dpuCluster)).To(Succeed())
+
+		// Set DPUCluster phase to Ready
+		dpuCluster.Status.Phase = dpuprovisioningv1alpha1.PhaseReady
+		Expect(k8sClient.Status().Update(ctx, dpuCluster)).To(Succeed())
+
+		// Create pull-secret
+		pullSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pullSecretName,
+				Namespace: testNamespace,
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{
+				".dockerconfigjson": []byte(`{"auths":{"quay.io":{"auth":"dGVzdDp0ZXN0MTIz"}}}`),
+			},
+		}
+		Expect(k8sClient.Create(ctx, pullSecret)).To(Succeed())
+
+		// Create ssh-key - must contain "id_rsa.pub" key as expected by validator
+		sshKey := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sshKeySecretName,
+				Namespace: testNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"id_rsa.pub": []byte("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."),
+			},
+		}
+		Expect(k8sClient.Create(ctx, sshKey)).To(Succeed())
+	})
+
+	AfterEach(func() {
+		// Clean up all bridge resources
+		bridgeList := &provisioningv1alpha1.DPFHCPBridgeList{}
+		_ = k8sClient.List(ctx, bridgeList)
+		for _, bridge := range bridgeList.Items {
+			_ = k8sClient.Delete(ctx, &bridge)
+		}
+
+		// Clean up DPUCluster
+		dpuCluster := &dpuprovisioningv1alpha1.DPUCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      dpuClusterName,
+				Namespace: testNamespace,
+			},
+		}
+		_ = k8sClient.Delete(ctx, dpuCluster)
+
+		// Clean up secrets
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pullSecretName,
+				Namespace: testNamespace,
+			},
+		})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sshKeySecretName,
+				Namespace: testNamespace,
+			},
+		})
+
+		// Clean up ConfigMap
+		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ocp-bluefield-images",
+				Namespace: "dpf-hcp-bridge-system",
+			},
+		})
+
+		// Clean up copied secrets in clusters namespace
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "phase-test-pull-secret",
+				Namespace: "clusters",
+			},
+		})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "phase-test-ssh-key",
+				Namespace: "clusters",
+			},
+		})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "phase-test-etcd-encryption-key",
+				Namespace: "clusters",
+			},
+		})
+	})
+
+	Context("Controller-Driven Phase Computation", func() {
+		It("should transition to Pending when all validations pass", func() {
+			// Create DPFHCPBridge with valid configuration
+			bridge := &provisioningv1alpha1.DPFHCPBridge{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "phase-test",
+					Namespace: testNamespace,
+				},
+				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
+					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
+						Name:      dpuClusterName,
+						Namespace: testNamespace,
+					},
+					BaseDomain:                     "test-cluster.example.com",
+					OCPReleaseImage:                ocpReleaseImage,
+					SSHKeySecretRef:                corev1.LocalObjectReference{Name: sshKeySecretName},
+					PullSecretRef:                  corev1.LocalObjectReference{Name: pullSecretName},
+					EtcdStorageClass:               "standard",
+					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
+				},
+			}
+			Expect(k8sClient.Create(ctx, bridge)).To(Succeed())
+
+			// Controller should set phase to Pending after all validations pass
+			Eventually(func() provisioningv1alpha1.DPFHCPBridgePhase {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test", Namespace: testNamespace}, bridge)
+				if err != nil {
+					return ""
+				}
+				return bridge.Status.Phase
+			}, timeout, interval).Should(Equal(provisioningv1alpha1.PhasePending))
+
+			// Verify validation conditions are set correctly
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test", Namespace: testNamespace}, bridge)
+				if err != nil {
+					return false
+				}
+
+				// All validation conditions should be successful
+				secretsCond := meta.FindStatusCondition(bridge.Status.Conditions, "SecretsValid")
+				if secretsCond == nil || secretsCond.Status != metav1.ConditionTrue {
+					return false
+				}
+
+				imageCond := meta.FindStatusCondition(bridge.Status.Conditions, "BlueFieldImageResolved")
+				if imageCond == nil || imageCond.Status != metav1.ConditionTrue {
+					return false
+				}
+
+				return true
+			}, timeout, interval).Should(BeTrue())
+		})
+
+		It("should transition to Failed when DPUCluster is missing", func() {
+			// Create DPFHCPBridge referencing non-existent DPUCluster
+			bridge := &provisioningv1alpha1.DPFHCPBridge{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "phase-test-missing-dpu",
+					Namespace: testNamespace,
+				},
+				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
+					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
+						Name:      "non-existent-dpu",
+						Namespace: testNamespace,
+					},
+					BaseDomain:                     "test-cluster.example.com",
+					OCPReleaseImage:                ocpReleaseImage,
+					SSHKeySecretRef:                corev1.LocalObjectReference{Name: sshKeySecretName},
+					PullSecretRef:                  corev1.LocalObjectReference{Name: pullSecretName},
+					EtcdStorageClass:               "standard",
+					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
+				},
+			}
+			Expect(k8sClient.Create(ctx, bridge)).To(Succeed())
+
+			// Controller should set phase to Failed
+			Eventually(func() provisioningv1alpha1.DPFHCPBridgePhase {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test-missing-dpu", Namespace: testNamespace}, bridge)
+				if err != nil {
+					return ""
+				}
+				return bridge.Status.Phase
+			}, timeout, interval).Should(Equal(provisioningv1alpha1.PhaseFailed))
+
+			// Verify DPUClusterMissing condition is set
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test-missing-dpu", Namespace: testNamespace}, bridge)
+				if err != nil {
+					return false
+				}
+
+				missingCond := meta.FindStatusCondition(bridge.Status.Conditions, "DPUClusterMissing")
+				return missingCond != nil && missingCond.Status == metav1.ConditionTrue
+			}, timeout, interval).Should(BeTrue())
+		})
+
+		It("should transition to Deleting when CR is being deleted", func() {
+			// Create DPFHCPBridge
+			bridge := &provisioningv1alpha1.DPFHCPBridge{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "phase-test-deleting",
+					Namespace: testNamespace,
+				},
+				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
+					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
+						Name:      dpuClusterName,
+						Namespace: testNamespace,
+					},
+					BaseDomain:                     "test-cluster.example.com",
+					OCPReleaseImage:                ocpReleaseImage,
+					SSHKeySecretRef:                corev1.LocalObjectReference{Name: sshKeySecretName},
+					PullSecretRef:                  corev1.LocalObjectReference{Name: pullSecretName},
+					EtcdStorageClass:               "standard",
+					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
+				},
+			}
+			Expect(k8sClient.Create(ctx, bridge)).To(Succeed())
+
+			// Wait for initial phase
+			Eventually(func() provisioningv1alpha1.DPFHCPBridgePhase {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test-deleting", Namespace: testNamespace}, bridge)
+				if err != nil {
+					return ""
+				}
+				return bridge.Status.Phase
+			}, timeout, interval).Should(Equal(provisioningv1alpha1.PhasePending))
+
+			// Delete the CR
+			Expect(k8sClient.Delete(ctx, bridge)).To(Succeed())
+
+			// Controller should set phase to Deleting (if CR still exists during deletion)
+			// Note: CR might be deleted very quickly, so we check if either:
+			// 1. Phase is Deleting (CR still exists)
+			// 2. CR is deleted (which is also acceptable)
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "phase-test-deleting", Namespace: testNamespace}, bridge)
+				if apierrors.IsNotFound(err) {
+					// CR deleted successfully
+					return true
+				}
+				// If CR still exists, phase should be Deleting
+				return bridge.Status.Phase == provisioningv1alpha1.PhaseDeleting
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+})
