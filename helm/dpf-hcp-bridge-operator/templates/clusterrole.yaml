@@ -91,6 +91,16 @@ rules:
   - watch
   - create
 
+# Node read permissions (for NodePort mode address detection)
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+
 # DPUCluster read permissions (for reference validation)
 - apiGroups:
   - provisioning.dpu.nvidia.com
@@ -100,3 +110,25 @@ rules:
   - get
   - list
   - watch
+
+# HyperShift HostedCluster and NodePool permissions
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters
+  - nodepools
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters/status
+  - nodepools/status
+  verbs:
+  - get

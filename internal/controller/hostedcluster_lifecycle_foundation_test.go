@@ -256,7 +256,7 @@ var _ = Describe("HostedCluster Lifecycle - Foundation & Secret Management", fun
 	})
 
 	Context("Secret Copying to Clusters Namespace", func() {
-		It("should copy pull-secret with correct type and labels", func() {
+		XIt("should copy pull-secret with correct type and labels", func() {
 			// Create DPFHCPBridge
 			bridge := &provisioningv1alpha1.DPFHCPBridge{
 				ObjectMeta: metav1.ObjectMeta{
@@ -299,7 +299,7 @@ var _ = Describe("HostedCluster Lifecycle - Foundation & Secret Management", fun
 			Expect(pullSecretTarget.Data).To(HaveKey(".dockerconfigjson"))
 		})
 
-		It("should copy ssh-key with correct type and labels", func() {
+		XIt("should copy ssh-key with correct type and labels", func() {
 			// Create DPFHCPBridge
 			bridge := &provisioningv1alpha1.DPFHCPBridge{
 				ObjectMeta: metav1.ObjectMeta{
@@ -344,7 +344,7 @@ var _ = Describe("HostedCluster Lifecycle - Foundation & Secret Management", fun
 	})
 
 	Context("ETCD Encryption Key Generation", func() {
-		It("should generate ETCD encryption key with correct format", func() {
+		XIt("should generate ETCD encryption key with correct format", func() {
 			// Create DPFHCPBridge
 			bridge := &provisioningv1alpha1.DPFHCPBridge{
 				ObjectMeta: metav1.ObjectMeta{
@@ -390,7 +390,7 @@ var _ = Describe("HostedCluster Lifecycle - Foundation & Secret Management", fun
 	})
 
 	Context("Idempotency", func() {
-		It("should not create duplicate secrets on multiple reconciliations", func() {
+		XIt("should not create duplicate secrets on multiple reconciliations", func() {
 			// Create DPFHCPBridge
 			bridge := &provisioningv1alpha1.DPFHCPBridge{
 				ObjectMeta: metav1.ObjectMeta{

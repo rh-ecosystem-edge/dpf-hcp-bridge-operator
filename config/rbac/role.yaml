@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - nodes
   verbs:
   - get
   - list
@@ -52,6 +53,26 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters
+  - nodepools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters/status
+  - nodepools/status
+  verbs:
+  - get
 - apiGroups:
   - provisioning.dpu.hcp.io
   resources:

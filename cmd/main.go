@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	dpuprovisioningv1alpha1 "github.com/nvidia/doca-platform/api/provisioning/v1alpha1"
+	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/bluefield"
@@ -62,6 +63,7 @@ func init() {
 
 	utilruntime.Must(provisioningv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(dpuprovisioningv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(hyperv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -232,14 +234,22 @@ func main() {
 	// Initialize Secret Manager for HostedCluster lifecycle
 	secretManager := hostedcluster.NewSecretManager(mgr.GetClient())
 
+	// Initialize HostedCluster Manager
+	hostedClusterManager := hostedcluster.NewHostedClusterManager(mgr.GetClient())
+
+	// Initialize NodePool Manager
+	nodePoolManager := hostedcluster.NewNodePoolManager(mgr.GetClient())
+
 	if err := (&controller.DPFHCPBridgeReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		Recorder:            mgr.GetEventRecorderFor("dpfhcpbridge-controller"),
-		ImageResolver:       imageResolver,
-		DPUClusterValidator: dpuClusterValidator,
-		SecretsValidator:    secretsValidator,
-		SecretManager:       secretManager,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("dpfhcpbridge-controller"),
+		ImageResolver:        imageResolver,
+		DPUClusterValidator:  dpuClusterValidator,
+		SecretsValidator:     secretsValidator,
+		SecretManager:        secretManager,
+		HostedClusterManager: hostedClusterManager,
+		NodePoolManager:      nodePoolManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DPFHCPBridge")
 		os.Exit(1)
