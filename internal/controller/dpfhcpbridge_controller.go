@@ -47,12 +47,14 @@ import (
 // DPFHCPBridgeReconciler reconciles a DPFHCPBridge object
 type DPFHCPBridgeReconciler struct {
 	client.Client
-	Scheme              *runtime.Scheme
-	Recorder            record.EventRecorder
-	ImageResolver       *bluefield.ImageResolver
-	DPUClusterValidator *dpucluster.Validator
-	SecretsValidator    *secrets.Validator
-	SecretManager       *hostedcluster.SecretManager
+	Scheme               *runtime.Scheme
+	Recorder             record.EventRecorder
+	ImageResolver        *bluefield.ImageResolver
+	DPUClusterValidator  *dpucluster.Validator
+	SecretsValidator     *secrets.Validator
+	SecretManager        *hostedcluster.SecretManager
+	HostedClusterManager *hostedcluster.HostedClusterManager
+	NodePoolManager      *hostedcluster.NodePoolManager
 }
 
 const (
@@ -69,6 +71,11 @@ const (
 // +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpuclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters/status,verbs=get
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -156,9 +163,13 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		log.V(1).Info("Skipping BlueField image resolution - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
 	}
 
+	// Recompute phase after validations to ensure HostedCluster creation only proceeds if all validations pass
+	r.updatePhaseFromConditions(&cr)
+
 	// Feature: Copy Secrets to clusters namespace
-	// Only run during Pending/Failed phases (before provisioning starts)
-	if cr.Status.Phase == provisioningv1alpha1.PhasePending || cr.Status.Phase == provisioningv1alpha1.PhaseFailed {
+	// Only run during Pending phase (all validations must pass first)
+	// Note: We only check for Pending (not Failed) to prevent secret operations when validations fail
+	if cr.Status.Phase == provisioningv1alpha1.PhasePending {
 		log.V(1).Info("Copying secrets to clusters namespace")
 		if result, err := r.SecretManager.CopySecrets(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
 			if err != nil {
@@ -179,7 +190,39 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		log.V(1).Info("Skipping secret management - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
 	}
 
-	// Future features will be added here (Phase 2: HostedCluster creation, etc.)
+	// Feature: HostedCluster & NodePool Creation
+	// Only run during Pending phase (all validations must pass first)
+	// Note: We only check for Pending (not Failed) to prevent creation when validations fail
+	// If user fixes validation issues, phase will transition back to Pending and creation will proceed
+	if cr.Status.Phase == provisioningv1alpha1.PhasePending {
+		log.V(1).Info("Creating HostedCluster and NodePool")
+
+		// Create or update HostedCluster
+		if result, err := r.HostedClusterManager.CreateOrUpdateHostedCluster(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "HostedCluster creation failed")
+			}
+			return result, err
+		}
+
+		// Create NodePool
+		if result, err := r.NodePoolManager.CreateNodePool(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "NodePool creation failed")
+			}
+			return result, err
+		}
+
+		// Set hostedClusterRef in status after successful creation
+		cr.Status.HostedClusterRef = &corev1.ObjectReference{
+			Name:       cr.Name,
+			Namespace:  cr.Namespace,
+			Kind:       "HostedCluster",
+			APIVersion: "hypershift.openshift.io/v1beta1",
+		}
+	} else {
+		log.V(1).Info("Skipping HostedCluster/NodePool creation - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
+	}
 
 	// Compute final phase from all conditions after features have updated them
 	r.updatePhaseFromConditions(&cr)

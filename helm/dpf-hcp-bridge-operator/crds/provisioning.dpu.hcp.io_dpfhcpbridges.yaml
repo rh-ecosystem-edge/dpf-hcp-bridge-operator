@@ -115,7 +115,7 @@ spec:
                 description: |-
                   NodeSelector defines the node selector for the hosted control plane pods
                   It specifies which nodes in the management cluster can host the control plane workloads
-                  Default: {"node-role.kubernetes.io/master": ""} (schedules on master nodes)
+                  Default: {"node-role.kubernetes.io/control-plane": ""} (schedules on control-plane nodes)
                   This field is immutable.
                 type: object
                 x-kubernetes-validations:

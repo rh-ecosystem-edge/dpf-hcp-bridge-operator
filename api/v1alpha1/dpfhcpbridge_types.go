@@ -111,7 +111,7 @@ type DPFHCPBridgeSpec struct {
 
 	// NodeSelector defines the node selector for the hosted control plane pods
 	// It specifies which nodes in the management cluster can host the control plane workloads
-	// Default: {"node-role.kubernetes.io/master": ""} (schedules on master nodes)
+	// Default: {"node-role.kubernetes.io/control-plane": ""} (schedules on control-plane nodes)
 	// This field is immutable.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeSelector is immutable"
 	// +kubebuilder:validation:XValidation:rule="size(self) <= 20",message="nodeSelector map can have at most 20 entries"
