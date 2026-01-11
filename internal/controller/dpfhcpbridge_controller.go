@@ -97,7 +97,7 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// This ensures phase reflects the current state (including Deleting phase)
 	r.updatePhaseFromConditions(&cr)
 
-	// Handle deletion - finalizer cleanup will be implemented in later Phase
+	// Handle deletion - run finalizer cleanup
 	if !cr.DeletionTimestamp.IsZero() {
 		log.Info("DPFHCPBridge is being deleted", "namespace", cr.Namespace, "name", cr.Name)
 
@@ -109,13 +109,33 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		// For Phase 1, the finalizer just added, but cleanup not implemented yet
 		// Phase 3 will implement the actual cleanup logic
+
 		if controllerutil.ContainsFinalizer(&cr, FinalizerName) {
-			// Remove finalizer to allow deletion (Phase 3 will implement proper cleanup)
+			// Run finalizer cleanup
+			finalizerMgr := hostedcluster.NewFinalizerManager(r.Client)
+			result, err := finalizerMgr.HandleFinalizerCleanup(ctx, &cr)
+			if err != nil {
+				log.Error(err, "Finalizer cleanup failed")
+				return result, err
+			}
+
+			// If cleanup is still in progress (requeue requested), don't remove finalizer yet
+			if result.Requeue || result.RequeueAfter > 0 {
+				log.Info("Cleanup still in progress, will requeue",
+					"requeue", result.Requeue,
+					"requeueAfter", result.RequeueAfter)
+				return result, nil
+			}
+
+			// Cleanup fully completed - remove finalizer
+			log.Info("Removing finalizer after successful cleanup")
 			controllerutil.RemoveFinalizer(&cr, FinalizerName)
 			if err := r.Update(ctx, &cr); err != nil {
 				log.Error(err, "Failed to remove finalizer")
 				return ctrl.Result{}, err
 			}
+
+			log.Info("Finalizer removed, DPFHCPBridge will be deleted")
 		}
 		return ctrl.Result{}, nil
 	}
