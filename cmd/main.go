@@ -228,6 +228,9 @@ func main() {
 	// Initialize NodePool Manager
 	nodePoolManager := hostedcluster.NewNodePoolManager(mgr.GetClient(), mgr.GetScheme())
 
+	// Initialize Finalizer Manager
+	finalizerManager := hostedcluster.NewFinalizerManager(mgr.GetClient())
+
 	if err := (&controller.DPFHCPBridgeReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
@@ -238,6 +241,7 @@ func main() {
 		SecretManager:        secretManager,
 		HostedClusterManager: hostedClusterManager,
 		NodePoolManager:      nodePoolManager,
+		FinalizerManager:     finalizerManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DPFHCPBridge")
 		os.Exit(1)
