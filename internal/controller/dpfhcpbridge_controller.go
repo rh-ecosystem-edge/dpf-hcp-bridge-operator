@@ -358,8 +358,6 @@ func (r *DPFHCPBridgeReconciler) secretToRequests(ctx context.Context, obj clien
 }
 
 // updatePhaseFromConditions computes the phase based on all conditions
-// This follows the Kubernetes pattern where phase is derived from conditions,
-// not set by individual features (similar to NVIDIA DPUCluster controller)
 func (r *DPFHCPBridgeReconciler) updatePhaseFromConditions(cr *provisioningv1alpha1.DPFHCPBridge) {
 	// List of validation conditions that must pass before provisioning
 	// Order matters: check critical validations first

@@ -262,32 +262,6 @@ var _ = Describe("DPFHCPBridge API Types", func() {
 		})
 	})
 
-	Context("DPUClusterReference", func() {
-		It("should correctly represent a cross-namespace reference", func() {
-			ref := DPUClusterReference{
-				Name:      "test-dpu",
-				Namespace: "dpu-system",
-			}
-
-			Expect(ref.Name).To(Equal("test-dpu"))
-			Expect(ref.Namespace).To(Equal("dpu-system"))
-		})
-
-		It("should be settable in DPFHCPBridge spec", func() {
-			bridge := &DPFHCPBridge{
-				Spec: DPFHCPBridgeSpec{
-					DPUClusterRef: DPUClusterReference{
-						Name:      "cross-ns-dpu",
-						Namespace: "another-namespace",
-					},
-				},
-			}
-
-			Expect(bridge.Spec.DPUClusterRef.Name).To(Equal("cross-ns-dpu"))
-			Expect(bridge.Spec.DPUClusterRef.Namespace).To(Equal("another-namespace"))
-		})
-	})
-
 	Context("NodeSelector", func() {
 		It("should allow empty/nil NodeSelector (optional field)", func() {
 			bridge := &DPFHCPBridge{

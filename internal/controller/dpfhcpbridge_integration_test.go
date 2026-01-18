@@ -93,7 +93,6 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 			initialGeneration := toUpdate.Generation
 			// Update only mutable fields
 			toUpdate.Spec.OCPReleaseImage = "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.6-multi"
-			toUpdate.Spec.VirtualIP = "192.168.1.100"
 
 			err = k8sClient.Update(ctx, toUpdate)
 			Expect(err).NotTo(HaveOccurred())
@@ -103,7 +102,6 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: bridgeName, Namespace: "default"}, updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Spec.OCPReleaseImage).To(Equal("quay.io/openshift-release-dev/ocp-release:4.19.0-ec.6-multi"))
-			Expect(updated.Spec.VirtualIP).To(Equal("192.168.1.100"))
 			Expect(updated.Generation).To(BeNumerically(">", initialGeneration))
 
 			// DELETE
@@ -235,91 +233,6 @@ var _ = Describe("DPFHCPBridge Integration Tests with envtest", func() {
 			Expect(retrieved.Status.Conditions).To(HaveLen(1))
 			Expect(retrieved.Status.HostedClusterRef).NotTo(BeNil())
 			Expect(retrieved.Status.KubeConfigSecretRef).NotTo(BeNil())
-
-			// Clean up
-			_ = k8sClient.Delete(ctx, bridge)
-		})
-	})
-
-	Context("CRD Validation with envtest", func() {
-		It("should reject CR with invalid baseDomain at API server level", func() {
-			bridge := &provisioningv1alpha1.DPFHCPBridge{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "invalid-domain",
-					Namespace: "default",
-				},
-				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
-					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
-						Name:      "test-dpu",
-						Namespace: "dpu-system",
-					},
-					BaseDomain:                     "INVALID.DOMAIN.COM", // Uppercase not allowed
-					OCPReleaseImage:                "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.5-multi",
-					SSHKeySecretRef:                corev1.LocalObjectReference{Name: "test-ssh-key"},
-					PullSecretRef:                  corev1.LocalObjectReference{Name: "test-pull-secret"},
-					EtcdStorageClass:               "test-storage-class",
-					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
-				},
-			}
-
-			err := k8sClient.Create(ctx, bridge)
-			Expect(err).To(HaveOccurred(), "Invalid baseDomain should be rejected by CRD validation")
-		})
-
-		It("should reject CR missing required fields at API server level", func() {
-			bridge := &provisioningv1alpha1.DPFHCPBridge{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "missing-required",
-					Namespace: "default",
-				},
-				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
-					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
-						Name:      "test-dpu",
-						Namespace: "dpu-system",
-					},
-					// Missing BaseDomain (required)
-					OCPReleaseImage:                "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.5-multi",
-					SSHKeySecretRef:                corev1.LocalObjectReference{Name: "test-ssh-key"},
-					PullSecretRef:                  corev1.LocalObjectReference{Name: "test-pull-secret"},
-					EtcdStorageClass:               "test-storage-class",
-					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
-				},
-			}
-
-			err := k8sClient.Create(ctx, bridge)
-			Expect(err).To(HaveOccurred(), "Missing required field should be rejected by CRD validation")
-		})
-
-		It("should apply defaults when optional fields are omitted", func() {
-			bridge := &provisioningv1alpha1.DPFHCPBridge{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-defaults-applied",
-					Namespace: "default",
-				},
-				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
-					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
-						Name:      "test-dpu",
-						Namespace: "dpu-system",
-					},
-					BaseDomain:       "defaults.example.com",
-					OCPReleaseImage:  "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.5-multi",
-					SSHKeySecretRef:  corev1.LocalObjectReference{Name: "test-ssh-key"},
-					PullSecretRef:    corev1.LocalObjectReference{Name: "test-pull-secret"},
-					EtcdStorageClass: "test-storage-class",
-					VirtualIP:        "192.168.1.100", // Required for HighlyAvailable default
-					// Optional fields omitted - defaults should be applied
-				},
-			}
-
-			err := k8sClient.Create(ctx, bridge)
-			Expect(err).NotTo(HaveOccurred())
-
-			created := &provisioningv1alpha1.DPFHCPBridge{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "test-defaults-applied", Namespace: "default"}, created)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify defaults
-			Expect(created.Spec.ControlPlaneAvailabilityPolicy).To(Equal(hyperv1.HighlyAvailable))
 
 			// Clean up
 			_ = k8sClient.Delete(ctx, bridge)

@@ -143,6 +143,30 @@ var _ = Describe("DPFHCPBridge CRD Schema Validation Tests", func() {
 			err := k8sClient.Create(ctx, bridge)
 			Expect(err).To(HaveOccurred())
 		})
+
+		It("should reject CR missing required baseDomain field", func() {
+			bridge := &provisioningv1alpha1.DPFHCPBridge{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "missing-required",
+					Namespace: "default",
+				},
+				Spec: provisioningv1alpha1.DPFHCPBridgeSpec{
+					DPUClusterRef: provisioningv1alpha1.DPUClusterReference{
+						Name:      "test-dpu",
+						Namespace: "dpu-system",
+					},
+					// BaseDomain missing (required field)
+					OCPReleaseImage:                "quay.io/openshift-release-dev/ocp-release:4.19.0-ec.5-multi",
+					SSHKeySecretRef:                corev1.LocalObjectReference{Name: "test-ssh-key"},
+					PullSecretRef:                  corev1.LocalObjectReference{Name: "test-pull-secret"},
+					EtcdStorageClass:               "test-storage-class",
+					ControlPlaneAvailabilityPolicy: hyperv1.SingleReplica,
+				},
+			}
+
+			err := k8sClient.Create(ctx, bridge)
+			Expect(err).To(HaveOccurred(), "Missing required field should be rejected by CRD validation")
+		})
 	})
 
 	Context("Enum Validation", func() {

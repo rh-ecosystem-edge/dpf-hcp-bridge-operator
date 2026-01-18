@@ -257,9 +257,6 @@ var _ = Describe("DPUCluster Validator", func() {
 				Expect(condition.Reason).To(Equal(ReasonDPUClusterDeleted))
 				Expect(condition.Message).To(ContainSubstring("has been deleted"))
 				Expect(condition.Message).To(ContainSubstring("Please delete this DPFHCPBridge to clean up"))
-
-				// Event emission is verified in other tests
-				// Skipping event check here as the critical functionality (status/condition update) is verified above
 			})
 		})
 
