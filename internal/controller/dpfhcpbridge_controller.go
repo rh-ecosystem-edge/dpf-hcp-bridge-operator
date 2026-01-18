@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -28,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -38,18 +40,27 @@ import (
 	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/bluefield"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/dpucluster"
+	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/hostedcluster"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/secrets"
 )
 
 // DPFHCPBridgeReconciler reconciles a DPFHCPBridge object
 type DPFHCPBridgeReconciler struct {
 	client.Client
-	Scheme              *runtime.Scheme
-	Recorder            record.EventRecorder
-	ImageResolver       *bluefield.ImageResolver
-	DPUClusterValidator *dpucluster.Validator
-	SecretsValidator    *secrets.Validator
+	Scheme               *runtime.Scheme
+	Recorder             record.EventRecorder
+	ImageResolver        *bluefield.ImageResolver
+	DPUClusterValidator  *dpucluster.Validator
+	SecretsValidator     *secrets.Validator
+	SecretManager        *hostedcluster.SecretManager
+	HostedClusterManager *hostedcluster.HostedClusterManager
+	NodePoolManager      *hostedcluster.NodePoolManager
 }
+
+const (
+	// FinalizerName is the finalizer added to DPFHCPBridge resources
+	FinalizerName = "dpfhcpbridge.provisioning.dpu.hcp.io/finalizer"
+)
 
 // +kubebuilder:rbac:groups=provisioning.dpu.hcp.io,resources=dpfhcpbridges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=provisioning.dpu.hcp.io,resources=dpfhcpbridges/status,verbs=get;update;patch
@@ -58,7 +69,13 @@ type DPFHCPBridgeReconciler struct {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=provisioning.dpu.nvidia.com,resources=dpuclusters,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters/status,verbs=get
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -76,16 +93,64 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Handle deletion (finalizer logic will go here in future features)
+	// Compute phase from conditions at the start
+	// This ensures phase reflects the current state (including Deleting phase)
+	r.updatePhaseFromConditions(&cr)
+
+	// Handle deletion - run finalizer cleanup
 	if !cr.DeletionTimestamp.IsZero() {
 		log.Info("DPFHCPBridge is being deleted", "namespace", cr.Namespace, "name", cr.Name)
-		// Finalizer handling will be added in future features
+
+		// Persist the Deleting phase before removing finalizer
+		if err := r.Status().Update(ctx, &cr); err != nil {
+			log.Error(err, "Failed to update status to Deleting phase")
+			return ctrl.Result{}, err
+		}
+
+		// For Phase 1, the finalizer just added, but cleanup not implemented yet
+		// Phase 3 will implement the actual cleanup logic
+
+		if controllerutil.ContainsFinalizer(&cr, FinalizerName) {
+			// Run finalizer cleanup
+			finalizerMgr := hostedcluster.NewFinalizerManager(r.Client)
+			result, err := finalizerMgr.HandleFinalizerCleanup(ctx, &cr)
+			if err != nil {
+				log.Error(err, "Finalizer cleanup failed")
+				return result, err
+			}
+
+			// If cleanup is still in progress (requeue requested), don't remove finalizer yet
+			if result.Requeue || result.RequeueAfter > 0 {
+				log.Info("Cleanup still in progress, will requeue",
+					"requeue", result.Requeue,
+					"requeueAfter", result.RequeueAfter)
+				return result, nil
+			}
+
+			// Cleanup fully completed - remove finalizer
+			log.Info("Removing finalizer after successful cleanup")
+			controllerutil.RemoveFinalizer(&cr, FinalizerName)
+			if err := r.Update(ctx, &cr); err != nil {
+				log.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+
+			log.Info("Finalizer removed, DPFHCPBridge will be deleted")
+		}
 		return ctrl.Result{}, nil
 	}
 
-	// Compute phase from conditions at the start
-	// This ensures phase reflects the current state for feature gating
-	r.updatePhaseFromConditions(&cr)
+	// Add finalizer if not present (Phase 1: Foundation)
+	if !controllerutil.ContainsFinalizer(&cr, FinalizerName) {
+		log.Info("Adding finalizer to DPFHCPBridge", "finalizer", FinalizerName)
+		controllerutil.AddFinalizer(&cr, FinalizerName)
+		if err := r.Update(ctx, &cr); err != nil {
+			log.Error(err, "Failed to add finalizer")
+			return ctrl.Result{}, err
+		}
+		// Return and requeue to continue with the updated CR
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	// Feature: DPUCluster Validation
 	log.V(1).Info("Running DPUCluster validation feature")
@@ -118,7 +183,66 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		log.V(1).Info("Skipping BlueField image resolution - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
 	}
 
-	// Future features will be added here
+	// Recompute phase after validations to ensure HostedCluster creation only proceeds if all validations pass
+	r.updatePhaseFromConditions(&cr)
+
+	// Feature: Copy Secrets to clusters namespace
+	// Only run during Pending phase (all validations must pass first)
+	// Note: We only check for Pending (not Failed) to prevent secret operations when validations fail
+	if cr.Status.Phase == provisioningv1alpha1.PhasePending {
+		log.V(1).Info("Copying secrets to clusters namespace")
+		if result, err := r.SecretManager.CopySecrets(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "Secret copying failed")
+			}
+			return result, err
+		}
+
+		// Generate ETCD encryption key
+		log.V(1).Info("Generating ETCD encryption key")
+		if result, err := r.SecretManager.GenerateETCDEncryptionKey(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "ETCD key generation failed")
+			}
+			return result, err
+		}
+	} else {
+		log.V(1).Info("Skipping secret management - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
+	}
+
+	// Feature: HostedCluster & NodePool Creation
+	// Only run during Pending phase (all validations must pass first)
+	// Note: We only check for Pending (not Failed) to prevent creation when validations fail
+	// If user fixes validation issues, phase will transition back to Pending and creation will proceed
+	if cr.Status.Phase == provisioningv1alpha1.PhasePending {
+		log.V(1).Info("Creating HostedCluster and NodePool")
+
+		// Create or update HostedCluster
+		if result, err := r.HostedClusterManager.CreateOrUpdateHostedCluster(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "HostedCluster creation failed")
+			}
+			return result, err
+		}
+
+		// Create NodePool
+		if result, err := r.NodePoolManager.CreateNodePool(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			if err != nil {
+				log.Error(err, "NodePool creation failed")
+			}
+			return result, err
+		}
+
+		// Set hostedClusterRef in status after successful creation
+		cr.Status.HostedClusterRef = &corev1.ObjectReference{
+			Name:       cr.Name,
+			Namespace:  "clusters",
+			Kind:       "HostedCluster",
+			APIVersion: "hypershift.openshift.io/v1beta1",
+		}
+	} else {
+		log.V(1).Info("Skipping HostedCluster/NodePool creation - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
+	}
 
 	// Compute final phase from all conditions after features have updated them
 	r.updatePhaseFromConditions(&cr)
@@ -359,7 +483,13 @@ func (r *DPFHCPBridgeReconciler) secretToRequests(ctx context.Context, obj clien
 
 // updatePhaseFromConditions computes the phase based on all conditions
 func (r *DPFHCPBridgeReconciler) updatePhaseFromConditions(cr *provisioningv1alpha1.DPFHCPBridge) {
-	// List of validation conditions that must pass before provisioning
+	// Phase 1: Check for deletion (highest priority)
+	if !cr.DeletionTimestamp.IsZero() {
+		cr.Status.Phase = provisioningv1alpha1.PhaseDeleting
+		return
+	}
+
+	// Phase 2: List of validation conditions that must pass before provisioning
 	// Order matters: check critical validations first
 	validationChecks := []struct {
 		condType string
@@ -392,8 +522,19 @@ func (r *DPFHCPBridgeReconciler) updatePhaseFromConditions(cr *provisioningv1alp
 		}
 	}
 
-	// All validations passed
-	// Future: Check provisioning/ready conditions here
-	// For now, if all validations pass, phase is Pending (waiting for provisioning)
+	// Phase 3: Check for Ready condition (HostedCluster is operational)
+	readyCond := meta.FindStatusCondition(cr.Status.Conditions, "Ready")
+	if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
+		cr.Status.Phase = provisioningv1alpha1.PhaseReady
+		return
+	}
+
+	// Phase 4: Check if HostedCluster provisioning has started
+	if cr.Status.HostedClusterRef != nil {
+		cr.Status.Phase = provisioningv1alpha1.PhaseProvisioning
+		return
+	}
+
+	// Phase 5: All validations passed, waiting for provisioning to start
 	cr.Status.Phase = provisioningv1alpha1.PhasePending
 }

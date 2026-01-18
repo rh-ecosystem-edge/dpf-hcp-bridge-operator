@@ -56,12 +56,46 @@ rules:
   - create
   - patch
 
-# ConfigMap and Secret read permissions (for BlueField image mapping and secret validation)
+# ConfigMap read permissions (for BlueField image mapping)
 - apiGroups:
   - ""
   resources:
   - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+
+# Secret permissions (read user secrets, create/delete secrets in clusters namespace)
+- apiGroups:
+  - ""
+  resources:
   - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+
+# Namespace permissions (create clusters namespace at startup)
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+
+# Node read permissions (for NodePort mode address detection)
+- apiGroups:
+  - ""
+  resources:
+  - nodes
   verbs:
   - get
   - list
@@ -76,3 +110,25 @@ rules:
   - get
   - list
   - watch
+
+# HyperShift HostedCluster and NodePool permissions
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters
+  - nodepools
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters/status
+  - nodepools/status
+  verbs:
+  - get

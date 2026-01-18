@@ -8,7 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
-  - secrets
+  - nodes
   verbs:
   - get
   - list
@@ -21,6 +21,27 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - coordination.k8s.io
   resources:
   - leases
@@ -32,6 +53,26 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters
+  - nodepools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters/status
+  - nodepools/status
+  verbs:
+  - get
 - apiGroups:
   - provisioning.dpu.hcp.io
   resources:
