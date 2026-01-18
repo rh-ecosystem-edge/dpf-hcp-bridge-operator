@@ -109,6 +109,20 @@ spec:
                 x-kubernetes-validations:
                 - message: etcdStorageClass is immutable
                   rule: self == oldSelf
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NodeSelector defines the node selector for the hosted control plane pods
+                  It specifies which nodes in the management cluster can host the control plane workloads
+                  Default: {"node-role.kubernetes.io/master": ""} (schedules on master nodes)
+                  This field is immutable.
+                type: object
+                x-kubernetes-validations:
+                - message: nodeSelector is immutable
+                  rule: self == oldSelf
+                - message: nodeSelector map can have at most 20 entries
+                  rule: size(self) <= 20
               ocpReleaseImage:
                 description: |-
                   OCPReleaseImage is the full pull-spec URL for the OCP release image
@@ -179,9 +193,9 @@ spec:
           status:
             description: DPFHCPBridgeStatus defines the observed state of DPFHCPBridge
             properties:
-              blueFieldContainerImageAvailable:
-                description: BlueFieldContainerImageAvailable indicates whether a
-                  BlueField container image was successfully resolved
+              blueFieldContainerImage:
+                description: BlueFieldContainerImage is the resolved BlueField container
+                  image URL
                 type: string
               conditions:
                 description: Conditions represent the latest available observations
@@ -241,30 +255,6 @@ spec:
                   - type
                   type: object
                 type: array
-              dpuClusterMissing:
-                description: DPUClusterMissing indicates the referenced DPUCluster
-                  was deleted
-                type: boolean
-              etcdAvailable:
-                description: EtcdAvailable indicates etcd is available
-                type: string
-              hostedClusterAvailable:
-                description: HostedClusterAvailable indicates the HostedCluster has
-                  a healthy control plane
-                type: string
-              hostedClusterCleanup:
-                description: |-
-                  HostedClusterCleanup tracks HostedCluster deletion status during finalizer cleanup
-                  Valid values: Succeeded, InProgress, Failed
-                type: string
-              hostedClusterDegraded:
-                description: HostedClusterDegraded indicates the HostedCluster is
-                  encountering errors requiring intervention
-                type: string
-              hostedClusterProgressing:
-                description: HostedClusterProgressing indicates the HostedCluster
-                  is attempting deployment/upgrade
-                type: string
               hostedClusterRef:
                 description: HostedClusterRef is a reference to the created HostedCluster
                   CR
@@ -309,26 +299,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              ignitionEndpointAvailable:
-                description: IgnitionEndpointAvailable indicates the ignition server
-                  is available
-                type: boolean
-              ignitionServerValidReleaseInfo:
-                description: IgnitionServerValidReleaseInfo indicates the release
-                  has local ignition provider images
-                type: string
-              infrastructureReady:
-                description: InfrastructureReady indicates infrastructure for control
-                  plane is operational
-                type: string
-              kubeAPIServerAvailable:
-                description: KubeAPIServerAvailable indicates the Kubernetes API server
-                  is available
-                type: string
-              kubeConfigInjected:
-                description: KubeConfigInjected indicates whether the kubeconfig was
-                  successfully injected into the DPUCluster CR
-                type: boolean
               kubeConfigSecretRef:
                 description: KubeConfigSecretRef is a reference to the created kubeconfig
                   Secret in the DPUCluster's namespace
@@ -344,11 +314,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              observedGeneration:
-                description: ObservedGeneration reflects the generation of the most
-                  recently observed spec
-                format: int64
-                type: integer
               phase:
                 description: Phase represents the current lifecycle phase
                 enum:
@@ -357,14 +322,6 @@ spec:
                 - Ready
                 - Failed
                 - Deleting
-                type: string
-              validReleaseImage:
-                description: ValidReleaseImage indicates the release image in spec
-                  is valid for HostedCluster
-                type: string
-              validReleaseInfo:
-                description: ValidReleaseInfo indicates the release contains all required
-                  HyperShift images
                 type: string
             type: object
         type: object
