@@ -9,7 +9,7 @@ image:
   # Image tag (defaults to Chart appVersion if not specified)
   tag: v0.1.0
   # Image pull policy
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # Number of operator replicas (1 for leader election)
 replicaCount: 1
@@ -20,7 +20,9 @@ namespace: dpf-hcp-bridge-system
 # Service account configuration
 serviceAccount:
   # Name of the service account
-  name: dpf-hcp-bridge-operator-controller-manager
+  # Leave empty to auto-generate from release name (recommended for consistency)
+  # Example: release name "dpf-hcp-bridge-operator" → ServiceAccount "dpf-hcp-bridge-operator"
+  name: ""
   # Annotations to add to the service account
   annotations: {}
 
@@ -108,12 +110,6 @@ blueFieldImages: {}
   # "4.19.0-ec.5": "quay.io/edge-infrastructure/bluefield-rhcos:4.19.0-ec.5"
   # "4.18.0": "quay.io/edge-infrastructure/bluefield-rhcos:4.18.0"
   # "4.17.0": "quay.io/edge-infrastructure/bluefield-rhcos:4.17.0"
-
-# Namespace labels
-namespaceLabels:
-  control-plane: controller-manager
-  app.kubernetes.io/name: dpf-hcp-bridge-operator
-  app.kubernetes.io/managed-by: Helm
 
 # Additional labels to apply to all resources
 commonLabels: {}
