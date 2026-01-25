@@ -197,16 +197,27 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 			return result, err
 		}
-
-		// Set hostedClusterRef in status after successful creation
-		cr.Status.HostedClusterRef = &corev1.ObjectReference{
-			Name:       cr.Name,
-			Namespace:  cr.Namespace,
-			Kind:       "HostedCluster",
-			APIVersion: "hypershift.openshift.io/v1beta1",
-		}
 	} else {
 		log.V(1).Info("Skipping HostedCluster/NodePool creation - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
+	}
+
+	// Set hostedClusterRef if HostedCluster exists and is owned by this CR
+	// This ensures the ref is always set when the HostedCluster exists, regardless of phase
+	if cr.Status.HostedClusterRef == nil {
+		hc := &hyperv1.HostedCluster{}
+		hcKey := types.NamespacedName{Name: cr.Name, Namespace: cr.Namespace}
+		if err := r.Get(ctx, hcKey, hc); err == nil {
+			// HostedCluster exists - verify ownership and set ref
+			if metav1.IsControlledBy(hc, &cr) {
+				log.V(1).Info("Setting hostedClusterRef for existing HostedCluster")
+				cr.Status.HostedClusterRef = &corev1.ObjectReference{
+					Name:       cr.Name,
+					Namespace:  cr.Namespace,
+					Kind:       "HostedCluster",
+					APIVersion: "hypershift.openshift.io/v1beta1",
+				}
+			}
+		}
 	}
 
 	// Feature: HostedCluster Status Mirroring
@@ -255,7 +266,12 @@ func (r *DPFHCPBridgeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Watches(
 			&hyperv1.HostedCluster{},
-			handler.EnqueueRequestsFromMapFunc(r.hostedClusterToRequests),
+			handler.EnqueueRequestForOwner(
+				mgr.GetScheme(),
+				mgr.GetRESTMapper(),
+				&provisioningv1alpha1.DPFHCPBridge{},
+				handler.OnlyControllerOwner(),
+			),
 			builder.WithPredicates(hostedClusterPredicate()),
 		).
 		Named("dpfhcpbridge").
@@ -515,45 +531,6 @@ func conditionsEqual(oldConds, newConds []metav1.Condition) bool {
 	}
 
 	return true
-}
-
-// hostedClusterToRequests maps HostedCluster events to reconcile requests for DPFHCPBridge CRs
-// that own the HostedCluster (via labels)
-func (r *DPFHCPBridgeReconciler) hostedClusterToRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	log := logf.FromContext(ctx)
-
-	hc, ok := obj.(*hyperv1.HostedCluster)
-	if !ok {
-		log.Error(nil, "Failed to convert object to HostedCluster", "object", obj)
-		return []reconcile.Request{}
-	}
-
-	// Extract DPFHCPBridge name and namespace from labels
-	bridgeName := hc.Labels["dpfhcpbridge.provisioning.dpu.hcp.io/name"]
-	bridgeNamespace := hc.Labels["dpfhcpbridge.provisioning.dpu.hcp.io/namespace"]
-
-	if bridgeName == "" || bridgeNamespace == "" {
-		// HostedCluster not owned by DPFHCPBridge (no labels)
-		log.V(2).Info("HostedCluster not owned by DPFHCPBridge, skipping",
-			"hostedCluster", hc.Name,
-			"namespace", hc.Namespace)
-		return []reconcile.Request{}
-	}
-
-	log.V(1).Info("HostedCluster changed, reconciling owning DPFHCPBridge",
-		"hostedCluster", hc.Name,
-		"namespace", hc.Namespace,
-		"bridge", bridgeName,
-		"bridgeNamespace", bridgeNamespace)
-
-	return []reconcile.Request{
-		{
-			NamespacedName: types.NamespacedName{
-				Name:      bridgeName,
-				Namespace: bridgeNamespace,
-			},
-		},
-	}
 }
 
 // updatePhaseFromConditions computes the phase based on all conditions

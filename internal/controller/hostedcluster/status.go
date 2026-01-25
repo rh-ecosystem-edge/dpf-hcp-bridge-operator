@@ -18,8 +18,6 @@ package hostedcluster
 
 import (
 	"context"
-	"time"
-
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -30,11 +28,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	provisioningv1alpha1 "github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/api/v1alpha1"
-)
-
-const (
-	// RequeueDelayStatusPending is the delay before rechecking HostedCluster status
-	RequeueDelayStatusPending = 10 * time.Second
 )
 
 // StatusSyncer manages status synchronization from HostedCluster to DPFHCPBridge
@@ -93,10 +86,10 @@ func (ss *StatusSyncer) SyncStatusFromHostedCluster(ctx context.Context, cr *pro
 
 	// Check if HostedCluster status is populated yet
 	if hc.Status.Conditions == nil || len(hc.Status.Conditions) == 0 {
-		log.V(1).Info("HostedCluster status not yet populated, will retry",
+		log.V(1).Info("HostedCluster status not yet populated, skipping sync",
 			"hostedCluster", hcKey.String())
-		// Requeue after a short delay to check again
-		return ctrl.Result{RequeueAfter: RequeueDelayStatusPending}, nil
+		// Don't requeue - the HostedCluster watch will trigger reconciliation when status changes.
+		return ctrl.Result{}, nil
 	}
 
 	log.V(1).Info("Syncing status from HostedCluster",

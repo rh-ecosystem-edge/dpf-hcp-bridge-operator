@@ -139,7 +139,7 @@ var _ = Describe("Status Syncer", func() {
 			Expect(result.Requeue).To(BeFalse())
 		})
 
-		It("should requeue when HostedCluster status is not populated", func() {
+		It("should skip sync when HostedCluster status is not populated", func() {
 			// Create HostedCluster without status conditions
 			hcNoStatus := &hyperv1.HostedCluster{
 				ObjectMeta: metav1.ObjectMeta{
@@ -171,7 +171,9 @@ var _ = Describe("Status Syncer", func() {
 			result, err := syncer.SyncStatusFromHostedCluster(ctx, crNoStatus)
 
 			Expect(err).ToNot(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(RequeueDelayStatusPending))
+			// Should not requeue - the HostedCluster watch will trigger reconciliation when status changes
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 		})
 
 		It("should mirror all 7 HostedCluster conditions to DPFHCPBridge", func() {
