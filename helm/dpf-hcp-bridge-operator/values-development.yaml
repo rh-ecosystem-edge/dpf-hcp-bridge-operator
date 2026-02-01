@@ -30,6 +30,13 @@ resources:
 # Debug logging for development
 logLevel: debug
 
+# Feature flags for operator functionality
+features:
+  # BlueField image validation feature
+  blueFieldValidation:
+    # Disabled by default until we implement an alternative way to manage the OCP-to-BlueField list instead of using the ConfigMap
+    enabled: false
+
 # Leader election (can be disabled for single replica dev)
 leaderElection:
   enabled: true

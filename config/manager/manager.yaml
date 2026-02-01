@@ -65,6 +65,10 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env: []
+        # Uncomment to enable BlueField image validation (disabled by default until we implement an alternative way to manage the OCP-to-BlueField list instead of using the ConfigMap)
+        # - name: ENABLE_BLUEFIELD_VALIDATION
+        #   value: "true"
         ports: []
         securityContext:
           allowPrivilegeEscalation: false

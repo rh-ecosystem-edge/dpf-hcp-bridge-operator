@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"os"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -142,13 +143,34 @@ func (r *DPFHCPBridgeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Only validate image during initial creation/retry (Pending/Failed phases)
 	// Once cluster is provisioned (Provisioning/Ready), skip validation to avoid
 	// false failures when old OCP versions are removed from ConfigMap
-	if cr.Status.Phase == provisioningv1alpha1.PhasePending || cr.Status.Phase == provisioningv1alpha1.PhaseFailed {
-		log.V(1).Info("Running BlueField image resolution feature")
-		if result, err := r.ImageResolver.ResolveBlueFieldImage(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
-			return result, err
+	// Feature can be disabled via ENABLE_BLUEFIELD_VALIDATION env var (disabled by default until we implement an alternative way to manage the OCP-to-BlueField list instead of using the ConfigMap)
+	if os.Getenv("ENABLE_BLUEFIELD_VALIDATION") == "true" {
+		if cr.Status.Phase == provisioningv1alpha1.PhasePending || cr.Status.Phase == provisioningv1alpha1.PhaseFailed {
+			log.V(1).Info("Running BlueField image resolution feature")
+			if result, err := r.ImageResolver.ResolveBlueFieldImage(ctx, &cr); err != nil || result.Requeue || result.RequeueAfter > 0 {
+				return result, err
+			}
+		} else {
+			log.V(1).Info("Skipping BlueField image resolution - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
 		}
 	} else {
-		log.V(1).Info("Skipping BlueField image resolution - cluster already provisioned or being deleted", "phase", cr.Status.Phase)
+		log.V(1).Info("Skipping BlueField image resolution - feature disabled via ENABLE_BLUEFIELD_VALIDATION env var")
+		// Set BlueFieldImageResolved condition to True when feature is disabled
+		// This prevents old False conditions from blocking phase progression
+		condition := metav1.Condition{
+			Type:               provisioningv1alpha1.BlueFieldImageResolved,
+			Status:             metav1.ConditionTrue,
+			Reason:             "ValidationDisabled",
+			Message:            "BlueField image validation is disabled (ENABLE_BLUEFIELD_VALIDATION=false)",
+			LastTransitionTime: metav1.Now(),
+			ObservedGeneration: cr.Generation,
+		}
+		if changed := meta.SetStatusCondition(&cr.Status.Conditions, condition); changed {
+			if err := r.Status().Update(ctx, &cr); err != nil {
+				log.Error(err, "Failed to update BlueFieldImageResolved condition when feature is disabled")
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// Recompute phase after validations to ensure HostedCluster creation only proceeds if all validations pass

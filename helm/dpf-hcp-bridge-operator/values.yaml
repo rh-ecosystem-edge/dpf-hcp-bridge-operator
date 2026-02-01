@@ -38,6 +38,14 @@ resources:
 # Log level for the operator (debug, info, error)
 logLevel: info
 
+# Feature flags for operator functionality
+features:
+  # BlueField image validation feature
+  blueFieldValidation:
+    # Enable BlueField to OCP version validation
+    # Disabled by default until we implement an alternative way to manage the OCP-to-BlueField list instead of using the ConfigMap
+    enabled: false
+
 # Leader election configuration
 leaderElection:
   # Enable leader election (required for HA)

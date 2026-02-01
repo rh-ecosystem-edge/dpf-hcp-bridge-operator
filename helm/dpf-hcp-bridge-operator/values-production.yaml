@@ -31,6 +31,14 @@ resources:
 # Info level logging for production
 logLevel: info
 
+# Feature flags for operator functionality
+features:
+  # BlueField image validation feature
+  blueFieldValidation:
+    # Disabled by default until we implement an alternative way to manage the OCP-to-BlueField list instead of using the ConfigMap
+    # Set to true when BlueField images are available in Quay
+    enabled: false
+
 # Leader election enabled for HA
 leaderElection:
   enabled: true
