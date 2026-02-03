@@ -22,3 +22,21 @@ const (
 	// If the CR is renamed, update this constant once and it propagates everywhere.
 	DPFHCPBridgeName = "dpfhcpbridge"
 )
+
+// Label keys for cross-namespace resource ownership tracking
+const (
+	// LabelDPFHCPBridgeName is the label key for the DPFHCPBridge name
+	// Used to track resources owned by a specific DPFHCPBridge across namespaces
+	LabelDPFHCPBridgeName = "dpfhcpbridge.dpu.hcp.io/name"
+
+	// LabelDPFHCPBridgeNamespace is the label key for the DPFHCPBridge namespace
+	// Used to track resources owned by a specific DPFHCPBridge across namespaces
+	LabelDPFHCPBridgeNamespace = "dpfhcpbridge.dpu.hcp.io/namespace"
+)
+
+// Namespace constants
+const (
+	// OpenshiftOperatorsNamespace is the namespace for OpenShift operator resources
+	// Used for MetalLB resources and other operator-managed resources
+	OpenshiftOperatorsNamespace = "openshift-operators"
+)

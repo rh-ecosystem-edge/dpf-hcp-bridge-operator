@@ -46,7 +46,9 @@ import (
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/finalizer"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/hostedcluster"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/kubeconfiginjection"
+	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/metallb"
 	"github.com/rh-ecosystem-edge/dpf-hcp-bridge-operator/internal/controller/secrets"
+	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -61,6 +63,7 @@ func init() {
 	utilruntime.Must(provisioningv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(dpuprovisioningv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(hyperv1.AddToScheme(scheme))
+	utilruntime.Must(metallbv1beta1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -233,15 +236,22 @@ func main() {
 	// Initialize Kubeconfig Injector
 	kubeconfigInjector := kubeconfiginjection.NewKubeconfigInjector(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller"))
 
+	// Initialize MetalLB Manager
+	metalLBManager := metallb.NewMetalLBManager(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller"))
+
 	// Initialize Finalizer Manager with pluggable cleanup handlers
 	// Handlers are executed in registration order
 	finalizerManager := finalizer.NewManager(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller"))
 
-	// Register cleanup handlers in order (dependent resources first)
+	// Register cleanup handlers in order (dependent resources first, dependencies last)
 	// 1. Kubeconfig injection cleanup (removes kubeconfig from DPUCluster namespace)
 	finalizerManager.RegisterHandler(kubeconfiginjection.NewCleanupHandler(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller")))
-	// 2. HostedCluster cleanup (removes HostedCluster, NodePool, and secrets)
+	// 2. HostedCluster cleanup (removes HostedCluster, NodePool, services, and secrets)
+	//    Must run before MetalLB cleanup because LoadBalancer services depend on IPAddressPool
 	finalizerManager.RegisterHandler(hostedcluster.NewCleanupHandler(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller")))
+	// 3. MetalLB cleanup (removes IPAddressPool and L2Advertisement)
+	//    Must run after HostedCluster cleanup to avoid deleting IPs while services still exist
+	finalizerManager.RegisterHandler(metallb.NewCleanupHandler(mgr.GetClient(), mgr.GetEventRecorderFor("dpfhcpbridge-controller")))
 
 	// Initialize Status Syncer for HostedCluster status mirroring
 	statusSyncer := hostedcluster.NewStatusSyncer(mgr.GetClient())
@@ -254,6 +264,7 @@ func main() {
 		DPUClusterValidator:  dpuClusterValidator,
 		SecretsValidator:     secretsValidator,
 		SecretManager:        secretManager,
+		MetalLBManager:       metalLBManager,
 		HostedClusterManager: hostedClusterManager,
 		NodePoolManager:      nodePoolManager,
 		FinalizerManager:     finalizerManager,
