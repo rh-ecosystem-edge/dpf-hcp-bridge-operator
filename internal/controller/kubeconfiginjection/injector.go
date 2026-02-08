@@ -40,6 +40,9 @@ const (
 	// KubeconfigSecretSuffix is the suffix for HC admin kubeconfig secrets
 	KubeconfigSecretSuffix = "-admin-kubeconfig"
 
+	// KubeconfigSecretKey is the key name for kubeconfig data in secrets
+	KubeconfigSecretKey = "super-admin.conf"
+
 	// LabelOwnedBy is the label key for ownership tracking
 	LabelOwnedBy = "dpf-hcp-bridge-operator/owned-by"
 
@@ -364,14 +367,14 @@ func (ki *KubeconfigInjector) checkDrift(ctx context.Context, bridge *provisioni
 	}
 
 	// Compare kubeconfig data
-	sourceData, sourceOk := sourceSecret.Data["kubeconfig"]
-	destData, destOk := destSecret.Data["kubeconfig"]
+	sourceData, sourceOk := sourceSecret.Data[KubeconfigSecretKey]
+	destData, destOk := destSecret.Data[KubeconfigSecretKey]
 
 	if !sourceOk {
-		return false, fmt.Errorf("source secret missing 'kubeconfig' key")
+		return false, fmt.Errorf("source secret missing '%s' key", KubeconfigSecretKey)
 	}
 	if !destOk {
-		return false, fmt.Errorf("destination secret missing 'kubeconfig' key")
+		return false, fmt.Errorf("destination secret missing '%s' key", KubeconfigSecretKey)
 	}
 
 	hasDrift := !bytes.Equal(sourceData, destData)
@@ -399,9 +402,9 @@ func (ki *KubeconfigInjector) createOrUpdateKubeconfigSecret(ctx context.Context
 	}
 
 	// Extract kubeconfig data
-	kubeconfigData, ok := sourceSecret.Data["kubeconfig"]
+	kubeconfigData, ok := sourceSecret.Data[KubeconfigSecretKey]
 	if !ok {
-		return fmt.Errorf("source secret missing 'kubeconfig' key")
+		return fmt.Errorf("source secret missing '%s' key", KubeconfigSecretKey)
 	}
 
 	// Create destination secret
@@ -416,7 +419,7 @@ func (ki *KubeconfigInjector) createOrUpdateKubeconfigSecret(ctx context.Context
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
-			"kubeconfig": kubeconfigData,
+			KubeconfigSecretKey: kubeconfigData,
 		},
 	}
 
